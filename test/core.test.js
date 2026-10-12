@@ -8,6 +8,7 @@ import { Profile } from '../src/profile.js';
 import { Store, digest } from '../src/store.js';
 import { DeepSeek } from '../src/model.js';
 import { buildPlan, publicUrl } from '../src/forms.js';
+import { likelyEnglish, formatSummary } from '../src/mail.js';
 
 function temporary(t, beforeRemove = () => {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gse-assistant-'));
@@ -102,4 +103,18 @@ test('generated values, uncertain/ambiguous matches, scoped facts and mismatched
     { field_id: 'f5', fact_key: 'name', certain: true },
   ] });
   assert.deepEqual(plan.entries.map(entry => entry.value), ['known@example.org', null, null, null, null, null]);
+});
+
+test('unsafe links are rejected and email summaries preserve original deadline text', async () => {
+  await assert.rejects(publicUrl('http://127.0.0.1/'), /私有网络/);
+  await assert.rejects(publicUrl('https://user:password@example.org/'), /登录凭据/);
+  await assert.rejects(publicUrl('file:///etc/passwd'), /HTTP/);
+  assert.equal(likelyEnglish('Please upload the revised manuscript and respond to the reviewers before the deadline.'), true);
+  assert.equal(likelyEnglish('请在下周五之前上传修改稿，并提交逐条回复审稿人的说明。'), false);
+  const summary = { purpose: '修改论文', actions: ['提交修改稿'], deadlines: [{ original: 'October 25, 23:59', explanation: '未提供时区' }], requirements: [], uncertainties: ['时区不明'] };
+  const text = formatSummary({ subject: 'Revision', from: 'editor@example.org', messageId: '<test@example.org>' }, summary);
+  assert.match(text, /October 25, 23:59/);
+  assert.match(text, /未提供时区/);
+  assert.match(text, /<test@example.org>/);
+  assert.throws(() => formatSummary({}, { purpose: 'bad' }), /字段不完整/);
 });
