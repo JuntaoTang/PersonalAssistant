@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readEnv, loadConfig, redact } from '../src/config.js';
+import { Profile } from '../src/profile.js';
 
 function temporary(t, beforeRemove = () => {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gse-assistant-'));
@@ -22,4 +23,20 @@ test('bare API key is loaded, local config overrides it, and logs redact credent
   assert.equal(config.apiKey, 'sk-test-secret');
   assert.equal(config.mailEnabled, false);
   assert.equal(redact('sk-test-secret feishu-secret mail-secret ?ticket=signed', config), '[REDACTED] [REDACTED] [REDACTED] ?ticket=[REDACTED]');
+});
+
+test('profile corrections persist, unknown facts stay absent, old versions are retained', t => {
+  const root = temporary(t);
+  const profile = new Profile(root);
+  assert.deepEqual(profile.facts(), {});
+  profile.set('常用邮箱', 'first@example.org');
+  const previousHash = profile.hash();
+  profile.set('常用邮箱', 'corrected@example.org');
+  const reopened = new Profile(root);
+  assert.equal(reopened.facts()['常用邮箱'].value, 'corrected@example.org');
+  assert.notEqual(reopened.hash(), previousHash);
+  assert.equal(reopened.facts()['姓名（中文）'], undefined);
+  assert.equal(fs.readdirSync(path.join(root, 'profile-history')).length, 2);
+  reopened.set('常用邮箱', '');
+  assert.equal(reopened.facts()['常用邮箱'], undefined);
 });
