@@ -6,6 +6,7 @@ import path from 'node:path';
 import { readEnv, loadConfig, redact } from '../src/config.js';
 import { Profile } from '../src/profile.js';
 import { Store, digest } from '../src/store.js';
+import { DeepSeek } from '../src/model.js';
 
 function temporary(t, beforeRemove = () => {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gse-assistant-'));
@@ -68,4 +69,21 @@ test('approval belongs to its user and exact plan; duplicate events and approval
   assert.equal(store.pendingMail().length, 1);
   store.mailDelivered('stable-id');
   assert.equal(store.pendingMail().length, 0);
+});
+
+test('model fallback handles unavailable service, but does not retry invalid credentials', async () => {
+  const config = { apiKey: 'test', baseUrl: 'https://example.org', models: ['primary', 'fallback'] };
+  const used = [];
+  const model = new DeepSeek(config, async (_, request) => {
+    const body = JSON.parse(request.body);
+    used.push(body.model);
+    assert.equal(body.thinking.type, 'disabled');
+    return used.length === 1 ? { ok: false, status: 503 } : { ok: true, json: async () => ({ model: 'fallback', choices: [{ message: { content: '{"ok":true}' } }] }) };
+  });
+  assert.deepEqual(await model.json('JSON test', {}), { ok: true });
+  assert.deepEqual(used, ['primary', 'fallback']);
+  let calls = 0;
+  const unauthorized = new DeepSeek(config, async () => { calls++; return { ok: false, status: 401 }; });
+  await assert.rejects(unauthorized.json('JSON', {}), /401/);
+  assert.equal(calls, 1);
 });
