@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readEnv, loadConfig, redact } from '../src/config.js';
 import { Profile } from '../src/profile.js';
+import { Store, digest } from '../src/store.js';
 
 function temporary(t, beforeRemove = () => {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gse-assistant-'));
@@ -39,4 +40,32 @@ test('profile corrections persist, unknown facts stay absent, old versions are r
   assert.equal(fs.readdirSync(path.join(root, 'profile-history')).length, 2);
   reopened.set('常用邮箱', '');
   assert.equal(reopened.facts()['常用邮箱'], undefined);
+});
+
+test('approval belongs to its user and exact plan; duplicate events and approvals do not replay', t => {
+  let store;
+  store = new Store(path.join(temporary(t, () => store.close()), 'state.sqlite'));
+  assert.equal(store.enqueue('m1', 'owner', 'chat', 'hello'), true);
+  assert.equal(store.enqueue('m1', 'owner', 'chat', 'hello'), false);
+  assert.equal(store.nextMessage().id, 'm1');
+  assert.equal(store.nextMessage(), undefined);
+  const task = store.createTask('owner', 'chat', 'https://example.org');
+  store.plan(task.id, { entries: [{ value: 'a' }] });
+  assert.equal(store.approve(task.id, 'stranger', digest({ entries: [{ value: 'a' }] })), false);
+  assert.equal(store.approve(task.id, 'owner', 'wrong'), false);
+  const oldCode = digest(store.task(task.id).plan);
+  store.plan(task.id, { entries: [{ value: 'b' }] });
+  assert.equal(store.approve(task.id, 'owner', oldCode), false);
+  const code = digest(store.task(task.id).plan);
+  assert.equal(store.approve(task.id, 'owner', code), true);
+  assert.equal(store.approve(task.id, 'owner', code), false);
+  store.status(task.id, 'filling');
+  store.recover();
+  assert.equal(store.task(task.id).status, 'needs_review');
+  assert.equal(store.nextMessage(), undefined);
+  store.saveMail('stable-id', { subject: 'one' });
+  store.saveMail('stable-id', { subject: 'two' });
+  assert.equal(store.pendingMail().length, 1);
+  store.mailDelivered('stable-id');
+  assert.equal(store.pendingMail().length, 0);
 });
