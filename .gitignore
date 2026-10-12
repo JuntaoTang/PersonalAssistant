@@ -1,0 +1,15 @@
+# 本机凭据与个人资料
+.env
+.env.*
+!.env.example
+data/
+secrets/
+
+# 运行结果与本机环境
+logs/
+*.log
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+dist/

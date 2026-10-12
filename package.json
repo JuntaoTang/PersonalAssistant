@@ -1,0 +1,19 @@
+{
+  "name": "gse-personal-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.75.0",
+    "dotenv": "18.0.7",
+    "imapflow": "2.4.0",
+    "mailparser": "3.9.38",
+    "playwright": "1.64.0"
+  }
+}
