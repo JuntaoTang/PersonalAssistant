@@ -1,4 +1,4 @@
-# 架构与执行约束
+# 当前实现
 
 Node.js 24 单进程运行；Windows 以隐藏的独立子进程启动。飞书长连接接收私聊，不需要公网服务器。需求依据见 [requirements.md](requirements.md)。
 
