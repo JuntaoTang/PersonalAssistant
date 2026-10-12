@@ -7,6 +7,7 @@ import { readEnv, loadConfig, redact } from '../src/config.js';
 import { Profile } from '../src/profile.js';
 import { Store, digest } from '../src/store.js';
 import { DeepSeek } from '../src/model.js';
+import { buildPlan, publicUrl } from '../src/forms.js';
 
 function temporary(t, beforeRemove = () => {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gse-assistant-'));
@@ -86,4 +87,19 @@ test('model fallback handles unavailable service, but does not retry invalid cre
   const unauthorized = new DeepSeek(config, async () => { calls++; return { ok: false, status: 401 }; });
   await assert.rejects(unauthorized.json('JSON', {}), /401/);
   assert.equal(calls, 1);
+});
+
+test('generated values, uncertain/ambiguous matches, scoped facts and mismatched choices cannot enter a plan', () => {
+  const fields = Array.from({ length: 6 }, (_, i) => ({ id: `f${i}`, label: `field${i}`, required: true }));
+  fields[5].options = [{ label: 'Other', value: '1' }];
+  const facts = { email: { value: 'known@example.org', scope: '' }, limited: { value: 'limited', scope: '2025 only' }, name: { value: 'Name', scope: '' } };
+  const plan = buildPlan({ url: 'https://example.org', fields }, 'hash', facts, { matches: [
+    { field_id: 'f0', fact_key: 'email', certain: true, value: 'invented' },
+    { field_id: 'f1', fact_key: 'missing', certain: true },
+    { field_id: 'f2', fact_key: 'name', certain: false },
+    { field_id: 'f3', fact_key: 'limited', certain: true },
+    { field_id: 'f4', fact_key: 'name', certain: true }, { field_id: 'f4', fact_key: 'email', certain: true },
+    { field_id: 'f5', fact_key: 'name', certain: true },
+  ] });
+  assert.deepEqual(plan.entries.map(entry => entry.value), ['known@example.org', null, null, null, null, null]);
 });

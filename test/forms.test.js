@@ -1,0 +1,46 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import { Forms, buildPlan } from '../src/forms.js';
+import { Profile } from '../src/profile.js';
+import { digest } from '../src/store.js';
+
+test('real headless browser: approval before filling, unknown required field stays blank, never submits, stale data rejected', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gse-browser-'));
+  const profile = new Profile(root);
+  profile.set('常用邮箱', 'test@example.org');
+  const forms = new Forms({ allowLocal: true });
+  let submissions = 0;
+  let changed = false;
+  const server = http.createServer((request, response) => {
+    if (request.url === '/submit') submissions++;
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end(`<title>测试报名</title><form action="/submit" method="post"><label>邮箱<input type="email" name="email"></label><label>${changed ? '新问题' : '姓名'}<input name="name" required></label><button type="submit">提交</button></form>`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { await forms.close(); await new Promise(resolve => server.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); });
+  const url = `http://127.0.0.1:${server.address().port}/`;
+  const snapshot = await forms.inspect(url);
+  const plan = buildPlan(snapshot, profile.hash(), profile.facts(), { matches: [{ field_id: 'f0', fact_key: '常用邮箱', certain: true }] });
+  assert.equal(plan.entries[1].value, null);
+  assert.equal(plan.entries[1].required, true);
+  const task = { id: 'fixture', status: 'awaiting_confirmation', plan };
+  await assert.rejects(forms.fill(task, profile, path.join(root, 'before.png')), /尚未获得/);
+  assert.equal(forms.sessions.size, 0);
+  task.status = 'approved'; task.approval = digest(plan);
+  const result = await forms.fill(task, profile, path.join(root, 'result.png'));
+  const page = forms.sessions.get(task.id).page;
+  assert.equal(await page.locator('[name=email]').inputValue(), 'test@example.org');
+  assert.equal(await page.locator('[name=name]').inputValue(), '');
+  assert.equal(submissions, 0);
+  assert.match(result, /未提交/);
+  assert.ok(fs.statSync(path.join(root, 'result.png')).size > 0);
+  changed = true;
+  await assert.rejects(forms.fill(task, profile, path.join(root, 'changed.png')), /表单内容发生变化/);
+  profile.set('常用邮箱', 'new@example.org');
+  await assert.rejects(forms.fill(task, profile, path.join(root, 'stale.png')), /资料已经变化/);
+  assert.equal(submissions, 0);
+});
