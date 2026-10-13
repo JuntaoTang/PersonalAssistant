@@ -1,6 +1,6 @@
 # 项目开发约定
 
-课程依据见 [notes.md](../../notes.md) 及其链接的 `lec/` 讲义；实验范围见 [lab1.md](../requirement/lab1.md)。用户明确要求开发全程保留 Git 痕迹，并遵循课程建议。
+课程与实验依据见 [课程摘要](docs/course-context.md)；本机完整来源为课程文件夹的 `notes.md`、`lec/` 与 `proj/requirement/lab1.md`。用户明确要求开发全程保留 Git 痕迹，并遵循课程建议。
 
 - 先写清已确认、禁止和未决的行为及验收条件；需要用户决定的产品行为不得自行当成已确认。
 - 每轮围绕一个能获得反馈的小目标，先验证最不确定的环节；需求变化同步维护 `requirements.md`，接口或数据归属变化同步维护 `architecture.md`。
