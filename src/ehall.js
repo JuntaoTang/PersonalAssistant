@@ -5,6 +5,7 @@ import { chromium, request } from 'playwright';
 export const ehallOrigin = 'https://ehall.nju.edu.cn';
 const accountPath = '/jsonp/ywtb/info/getUserInfoAndSchoolInfo';
 const searchPath = '/jsonp/ywtb/searchAppAndService';
+class EhallError extends Error {}
 
 export class EhallLoginRequired extends Error {
   constructor() { super('ehall 尚未登录或登录已失效。请发送「ehall 登录」，在这台电脑弹出的独立窗口中手动登录，再发送「ehall 登录完成」。密码和验证码不要发到飞书。'); }
@@ -13,11 +14,11 @@ export class EhallLoginRequired extends Error {
 function catalogItems(data) {
   const items = [];
   for (const [key, type] of [['appList', '应用'], ['serviceList', '办事事项']]) {
-    if (!Array.isArray(data?.[key])) throw new Error('ehall 服务目录格式已变化，未将响应当作查询结果');
+    if (!Array.isArray(data?.[key])) throw new EhallError('ehall 服务目录格式已变化，未将响应当作查询结果');
     for (const row of data[key]) {
       const name = row.appName || row.serviceName || row.name;
       const id = row.wid || row.appId || row.id;
-      if (typeof name !== 'string' || !name.trim() || !['string', 'number'].includes(typeof id)) throw new Error('ehall 服务条目格式未识别，需要检查接口适配');
+      if (typeof name !== 'string' || !name.trim() || !['string', 'number'].includes(typeof id)) throw new EhallError('ehall 服务条目格式未识别，需要检查接口适配');
       items.push({ id: String(id), name: name.trim(), type });
     }
   }
@@ -39,21 +40,25 @@ export class Ehall {
   }
   async api(pathname, params = {}, context = null) {
     const own = !context;
-    context ||= await this.request.newContext({ storageState: fs.existsSync(this.stateFile) ? this.stateFile : undefined });
     try {
+      context ||= await this.request.newContext({ storageState: fs.existsSync(this.stateFile) ? this.stateFile : undefined });
       const response = await context.get(this.origin + pathname, { params, timeout: 20000, maxRedirects: 0 });
       if ([301, 302, 303, 307, 308, 401, 403].includes(response.status())) throw new EhallLoginRequired();
-      if (!response.ok()) throw new Error(`ehall 查询失败，HTTP ${response.status()}`);
+      if (!response.ok()) throw new EhallError(`ehall 查询失败，HTTP ${response.status()}`);
       let result;
-      try { result = await response.json(); } catch { throw new Error('ehall 未返回可识别的数据，可能需要重新登录'); }
+      try { result = await response.json(); } catch { throw new EhallError('ehall 未返回可识别的数据，可能需要重新登录'); }
       if (result.hasLogin !== true || result.data?.hasLogin === false) throw new EhallLoginRequired();
-      if (result.result !== 'success') throw new Error('ehall 查询未成功，请稍后重试');
+      if (result.result !== 'success') throw new EhallError('ehall 查询未成功，请稍后重试');
       return result.data;
-    } finally { if (own) await context.dispose(); }
+    } catch (error) {
+      if (error instanceof EhallError || error instanceof EhallLoginRequired) throw error;
+      // Playwright errors may include a request log with Cookie headers.
+      throw new EhallError('ehall 请求未完成，请检查网络和本机会话文件，必要时重新登录。');
+    } finally { if (own) await context?.dispose().catch(() => {}); }
   }
   async beginLogin() {
     if (this.login && !this.login.page.isClosed()) return 'ehall 登录窗口已打开，请在电脑上完成登录，然后在飞书发送「ehall 登录完成」。';
-    this.login = null;
+    if (this.login) await this.close();
     const browser = await this.browserType.launch({ channel: 'msedge', headless: false });
     try {
       const context = await browser.newContext({ storageState: fs.existsSync(this.stateFile) ? this.stateFile : undefined, serviceWorkers: 'block' });

@@ -65,3 +65,15 @@ test('ehall login must be verified server-side before state is saved or the wind
   assert.equal(ehall.status().loginWindow, false);
   assert.equal(closed, 1);
 });
+
+test('request diagnostics cannot expose ehall cookies in user-visible errors', async () => {
+  const ehall = new Ehall({ dataDir: os.tmpdir() }, { request: { async newContext() { return {
+    async get() { throw new Error('Timeout: GET /query; Cookie: CAS-test-private-value'); },
+    async dispose() {},
+  }; } } });
+  await assert.rejects(ehall.api('/jsonp/ywtb/searchAppAndService'), error => {
+    assert.match(error.message, /请求未完成/);
+    assert.doesNotMatch(error.message, /CAS-test-private-value|Cookie/);
+    return true;
+  });
+});
