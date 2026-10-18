@@ -1,15 +1,17 @@
 import { ehallOrigin, formatCatalog } from './ehall.js';
 import { redact } from './config.js';
+import { formatTimetable } from './ehall-timetable.js';
 
 export const ehallHelp = `ehall 后台助手
 ehall 登录：仅首次或失效时，在电脑上打开独立登录窗口
 ehall 登录完成：核验并保存状态，关闭登录窗口
 ehall 状态：查看本机是否保存过登录状态
 ehall 服务 关键词：查询当前账号可见的服务目录
+ehall 课表：查询本人当前学期的本科课表
 ehall 结果 任务编号：重新查看本人的查询结果
 进度：查看任务状态
 
-服务目录不是个人成绩或课表内容。具体事务适配尚未启用；材料准备和填写须先完成首个真实事务的适配。当前没有提交、退课或撤销执行能力。`;
+服务目录只列出入口；「ehall 课表」返回个人课表内容。具体事务适配尚未启用；材料准备和填写须先完成首个真实事务的适配。当前没有提交、退课或撤销执行能力。`;
 
 export async function handleEhall(assistant, message) {
   const text = message.content;
@@ -31,14 +33,15 @@ export async function handleEhall(assistant, message) {
       return true;
     }
     const search = /^ehall 服务\s+(.+)$/.exec(command);
-    if (search) {
+    if (search || command === 'ehall 课表') {
+      const timetable = command === 'ehall 课表';
       const task = assistant.store.createTask(message.sender, message.chat, ehallOrigin, 'ehall_query');
       assistant.store.status(task.id, 'querying');
-      await reply(`任务 ${task.id}：后台正在查询 ehall 服务目录。`, 'started');
+      await reply(`任务 ${task.id}：后台正在查询${timetable ? '本人当前学期课表' : ' ehall 服务目录'}。`, 'started');
       let content;
       try {
-        const result = await assistant.ehall.catalog(search[1]);
-        content = `任务 ${task.id}\n${formatCatalog(result)}`;
+        const result = timetable ? await assistant.ehall.timetable() : await assistant.ehall.catalog(search[1]);
+        content = `任务 ${task.id}\n${timetable ? formatTimetable(result) : formatCatalog(result)}`;
         assistant.store.status(task.id, 'queried', content);
       } catch (error) {
         const reason = redact(error.message, assistant.config);

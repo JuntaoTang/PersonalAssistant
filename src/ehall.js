@@ -1,15 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, request } from 'playwright';
+import { EhallError, EhallLoginRequired } from './ehall-errors.js';
+import { queryTimetable } from './ehall-timetable.js';
+export { EhallLoginRequired } from './ehall-errors.js';
 
 export const ehallOrigin = 'https://ehall.nju.edu.cn';
 const accountPath = '/jsonp/ywtb/info/getUserInfoAndSchoolInfo';
 const searchPath = '/jsonp/ywtb/searchAppAndService';
-class EhallError extends Error {}
-
-export class EhallLoginRequired extends Error {
-  constructor() { super('ehall 尚未登录或登录已失效。请发送「ehall 登录」，在这台电脑弹出的独立窗口中手动登录，再发送「ehall 登录完成」。密码和验证码不要发到飞书。'); }
-}
 
 function catalogItems(data) {
   const items = [];
@@ -86,6 +84,10 @@ export class Ehall {
     if (!fs.existsSync(this.stateFile)) throw new EhallLoginRequired();
     const data = await this.api(searchPath, { searchKey: keyword });
     return { keyword, at: new Date().toISOString(), source: this.origin, scope: '当前账号可见的服务目录；不是个人成绩、课表内容或办件状态', items: catalogItems(data) };
+  }
+  async timetable() {
+    if (!fs.existsSync(this.stateFile)) throw new EhallLoginRequired();
+    return queryTimetable(this);
   }
   async close() {
     const login = this.login;

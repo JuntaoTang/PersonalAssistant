@@ -20,6 +20,7 @@ test('phone commands run through the owner queue, deduplicate queries, persist r
       async finishLogin() { called.push('finish'); return '已验证登录'; },
       status() { return { saved: false, loginWindow: false }; },
       async catalog(keyword) { called.push(keyword); return { keyword, at: '2026-10-18T00:00:00Z', source: 'https://ehall.nju.edu.cn', scope: '服务目录', items: [{ id: 'test-course', name: '课程服务', type: '应用' }] }; },
+      async timetable() { called.push('timetable'); return { term: { name: '测试学期' }, scheduled: [{ name: '虚构课程', code: '', weeks: '1-8周', day: '1', periods: '1～2', location: '测试教室', teacher: '', note: '', originalSchedule: '' }], pending: [], unarranged: [], at: '2026-10-18T00:00:00Z', source: 'https://ehall.nju.edu.cn' }; },
       async close() {},
     },
   };
@@ -56,6 +57,20 @@ test('phone commands run through the owner queue, deduplicate queries, persist r
   const count = sent.length;
   await receive('private-result', `ehall 结果 ${tasks[0].id}`, 'stranger');
   assert.equal(sent.length, count);
+  await receive('private-timetable', 'ehall 课表', 'stranger');
+  assert.equal(sent.length, count);
+  await receive('timetable', 'ehall 课表');
+  await receive('timetable', 'ehall 课表');
+  assert.deepEqual(called, ['login', 'finish', '课程', 'timetable']);
+  assert.match(sent.at(-1).text, /虚构课程/);
+  const timetableTask = app.store.recent('owner').find(task => task.id !== tasks[0].id);
+  assert.equal(timetableTask.kind, 'ehall_query');
+  assert.equal(timetableTask.status, 'queried');
+  await app.close();
+  app = new Assistant(config, dependencies);
+  await receive('timetable-result', `ehall 结果 ${timetableTask.id}`);
+  assert.match(sent.at(-1).text, /虚构课程/);
+  assert.deepEqual(called, ['login', 'finish', '课程', 'timetable']);
 });
 
 test('legacy tasks migrate without loss and interrupted queries are not replayed', t => {
