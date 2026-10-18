@@ -7,10 +7,10 @@ const clean = value => String(value).replaceAll('|', '／').replace(/[\r\n]/g, '
 
 export function parseFacts(markdown) {
   const facts = {};
-  for (const line of markdown.split('\n')) {
+  for (const [index, line] of markdown.split('\n').entries()) {
     const cells = line.split('|').slice(1, -1).map(value => value.trim());
     if (cells.length === 4 && cells[0] && cells[1] && !['字段', '事项', '规则'].includes(cells[0]) && !/^[-:]+$/.test(cells[0])) {
-      facts[cells[0]] = { value: cells[1], scope: cells[2], source: cells[3] };
+      facts[cells[0]] = { value: cells[1], scope: cells[2], source: cells[3], location: { file: 'profile.md', line: index + 1 } };
     }
   }
   return facts;
@@ -27,7 +27,19 @@ export class Profile {
   }
   read() { return fs.readFileSync(this.file, 'utf8'); }
   hash() { return createHash('sha256').update(this.read()).digest('hex'); }
-  facts() { return parseFacts(this.read()); }
+  snapshot() {
+    const markdown = this.read();
+    return { markdown, hash: createHash('sha256').update(markdown).digest('hex'), facts: parseFacts(markdown) };
+  }
+  facts() { return this.snapshot().facts; }
+  search(keyword) {
+    keyword = String(keyword).trim();
+    if (!keyword || keyword.length > 80) throw new Error('请提供 1～80 个字符的资料关键词，例如：查资料 姓名');
+    const snapshot = this.snapshot();
+    const query = keyword.toLocaleLowerCase();
+    const items = Object.entries(snapshot.facts).filter(([key, fact]) => [key, fact.value, fact.scope, fact.source].some(value => value.toLocaleLowerCase().includes(query))).map(([key, fact]) => ({ key, ...fact }));
+    return { keyword, hash: snapshot.hash, items: items.slice(0, 20), total: items.length };
+  }
   set(key, value, source = '用户明确提供', scope = '') {
     key = clean(key); value = clean(value);
     if (!key || ['字段', '事项', '规则'].includes(key) || key.length > 60 || value.length > 4000) throw new Error('资料字段或值不合适');
