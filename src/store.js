@@ -12,6 +12,9 @@ export class Store {
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, owner TEXT, chat TEXT, url TEXT, status TEXT, plan TEXT, approval TEXT, result TEXT, created TEXT);
       CREATE TABLE IF NOT EXISTS mail (id TEXT PRIMARY KEY, payload TEXT, summary TEXT, delivered INTEGER NOT NULL DEFAULT 0);
     `);
+    if (!this.db.prepare('PRAGMA table_info(tasks)').all().some(column => column.name === 'kind')) {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'form'");
+    }
   }
   get(key) { return this.db.prepare('SELECT value FROM meta WHERE key=?').get(key)?.value; }
   set(key, value) { this.db.prepare('INSERT INTO meta VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, String(value)); }
@@ -28,9 +31,9 @@ export class Store {
     return row;
   }
   finishMessage(id) { this.db.prepare("UPDATE inbox SET status='done' WHERE id=?").run(id); }
-  createTask(owner, chat, url) {
+  createTask(owner, chat, url, kind = 'form') {
     const id = randomUUID().slice(0, 8);
-    this.db.prepare('INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?)').run(id, owner, chat, url, 'inspecting', null, null, null, new Date().toISOString());
+    this.db.prepare('INSERT INTO tasks (id,owner,chat,url,status,plan,approval,result,created,kind) VALUES (?,?,?,?,?,?,?,?,?,?)').run(id, owner, chat, url, 'inspecting', null, null, null, new Date().toISOString(), kind);
     return this.task(id);
   }
   task(id) {
@@ -48,10 +51,10 @@ export class Store {
     return this.db.prepare("UPDATE tasks SET status='approved',approval=? WHERE id=? AND status='awaiting_confirmation'").run(code, id).changes === 1;
   }
   status(id, status, result = '') { this.db.prepare('UPDATE tasks SET status=?,result=? WHERE id=?').run(status, result, id); }
-  recent(owner) { return this.db.prepare('SELECT id,status,created FROM tasks WHERE owner=? ORDER BY created DESC LIMIT 10').all(owner); }
+  recent(owner) { return this.db.prepare('SELECT id,status,created,kind FROM tasks WHERE owner=? ORDER BY created DESC LIMIT 10').all(owner); }
   recover() {
     this.db.prepare("UPDATE inbox SET status='interrupted' WHERE status='processing'").run();
-    this.db.prepare("UPDATE tasks SET status='needs_review',result='上次执行被中断，请核实页面状态后重新发起，未自动重试' WHERE status IN ('filling','inspecting')").run();
+    this.db.prepare("UPDATE tasks SET status='needs_review',result='上次执行被中断，请核实页面状态后重新发起，未自动重试' WHERE status IN ('filling','inspecting','querying')").run();
     this.db.prepare("UPDATE tasks SET status='awaiting_confirmation',approval=NULL WHERE status='approved'").run();
     this.db.prepare("UPDATE tasks SET status='needs_review',result='后台浏览器已关闭；填写结果未提交，请重新发起' WHERE status='filled'").run();
   }

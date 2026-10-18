@@ -8,12 +8,15 @@ import { Forms, buildPlan, preview } from './forms.js';
 import { Feishu } from './feishu.js';
 import { collectMail, formatSummary } from './mail.js';
 import { redact } from './config.js';
+import { Ehall, ehallOrigin } from './ehall.js';
+import { handleEhall } from './ehall-commands.js';
 
 export const help = `个人助手指令
 资料：查看持久化个人资料
 资料 字段=值：保存你明确提供的事实；资料 字段= 可清空
 直接发送 HTTP/HTTPS 表单链接：先读取字段并展示拟填写内容
 确认填表 任务编号 确认码：执行对应预览
+ehall：查看 ehall 登录与后台查询指令
 进度：查看最近任务
 帮助：查看本说明
 当前版本填写后返回截图，最终提交尚未接入。`;
@@ -28,6 +31,7 @@ export function initialize(config) {
 const labels = {
   inspecting: '读取表单中', awaiting_confirmation: '待你确认', approved: '已确认',
   filling: '填写中', filled: '已填写，未提交', needs_review: '需要核实后重新发起', failed: '未完成',
+  querying: '查询中', queried: '已查询，可用 ehall 结果 任务编号 重看',
 };
 
 export class Assistant {
@@ -36,6 +40,7 @@ export class Assistant {
     Object.assign(this, initialize(config));
     this.model = dependencies.model || new DeepSeek(config);
     this.forms = dependencies.forms || new Forms();
+    this.ehall = dependencies.ehall || new Ehall(config);
     this.channel = dependencies.channel || null;
     this.stopping = false;
     this.lastMailCheck = 0;
@@ -53,6 +58,7 @@ export class Assistant {
     }
     if (this.store.get('owner') !== message.sender) return;
     this.store.set('chat', message.chat);
+    if (await handleEhall(this, message)) return;
     if (text === '帮助') return this.reply(message, help);
     if (text === '资料') return this.reply(message, this.profile.read());
     if (text.startsWith('资料 ')) {
@@ -63,10 +69,11 @@ export class Assistant {
     }
     if (text === '进度') {
       const tasks = this.store.recent(message.sender);
-      return this.reply(message, tasks.length ? tasks.map(task => `${task.id}：${labels[task.status] || task.status}`).join('\n') : '目前没有表单任务。');
+      return this.reply(message, tasks.length ? tasks.map(task => `${task.id}：${labels[task.status] || task.status}`).join('\n') : '目前没有任务。');
     }
     const approval = /^确认填表\s+([a-f0-9-]+)\s+([a-f0-9]+)$/.exec(text);
     if (approval) {
+      if (this.store.task(approval[1])?.kind !== 'form') return this.reply(message, '这不是公开表单填写任务，不能使用此确认指令。');
       if (!this.store.approve(approval[1], message.sender, approval[2])) return this.reply(message, '确认码或任务状态不匹配，请查看最新预览；已处理的确认不会重复执行。');
       const task = this.store.task(approval[1]);
       this.store.status(task.id, 'filling');
@@ -84,6 +91,9 @@ export class Assistant {
       return;
     }
     if (/^https?:\/\/\S+$/i.test(text)) {
+      if (!URL.canParse(text)) return this.reply(message, '链接格式不正确，请检查完整的 HTTP/HTTPS 地址。');
+      const host = new URL(text).hostname;
+      if ([new URL(ehallOrigin).hostname, 'ehallapp.nju.edu.cn', 'authserver.nju.edu.cn'].includes(host)) return this.reply(message, '校内登录与事务请使用 ehall 后台指令。发送「ehall」查看用法；公开表单通道不能绕过 ehall 的登录和事务适配边界。');
       const task = this.store.createTask(message.sender, message.chat, text);
       await this.reply(message, `任务 ${task.id}：正在读取表单，稍后给你填写预览。`, 'started');
       try {
@@ -139,6 +149,7 @@ export class Assistant {
     this.stopping = true;
     this.channel?.close();
     await this.forms.close();
+    await this.ehall.close();
     this.store.close();
   }
 }
